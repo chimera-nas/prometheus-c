@@ -90,8 +90,11 @@ The metrics scraping process is non-blocking with respect to metrics sampling fu
 The task of serving the scraped metrics string via HTTP or pushing it to a prometheus/OpenMetrics push gateway is left to the user.  However, a couple options from the chimera
 project itself include:
 
-https://github.com/chimera-nas/stupid-httpd
-https://github.com/chimera-nas/libevpl
+
+https://github.com/chimera-nas/stupid-httpd is a very simple single thread
+ed httpd server meant only for serving something like prometheus metrics in an insecure way.
+
+https://github.com/chimera-nas/libevpl is a high performance networking library that includes an httpd server component.
 
 ### Counters
 
