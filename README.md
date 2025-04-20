@@ -25,6 +25,7 @@ In particular:
     mutual exclusion scheme.  In this way the metrics are thread-safe without the need for additional locking or atomics
   * Create a private handle for each thread that will manipulate the metric series.  In this way, no locking or atomics are required.
   * Use a single global handle and share it amongst all the threads with application provided mutual exclusion.
+
   In any case, the metric samples added to each handle are automatically summed at scraping time.  Therefore, the number of handles
   is transparent to prometheus.
 * The library currently supports only integer arithmetic.
@@ -86,7 +87,11 @@ This function will return the length of resulting string that was printed into '
 
 The metrics scraping process is non-blocking with respect to metrics sampling functions.
 
-The task of serving the scraped metrics string via HTTP or pushing it to a prometheus/OpenMetrics push gateway is left to the user.
+The task of serving the scraped metrics string via HTTP or pushing it to a prometheus/OpenMetrics push gateway is left to the user.  However, a couple options from the chimera
+project itself include:
+
+https://github.com/chimera-nas/stupid-httpd
+https://github.com/chimera-nas/libevpl
 
 ### Counters
 
