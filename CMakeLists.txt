@@ -1,8 +1,8 @@
 project(prometheus-c)
 
-add_definitions(-O3 -Wall -Werror)
+add_definitions(-O3 -Wall -Werror -fvisibility=hidden)
 
-add_library(prometheus-c STATIC
+add_library(prometheus-c SHARED
     prometheus-c.c
     prometheus-c.h
 )

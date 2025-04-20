@@ -15,28 +15,28 @@ main(
 
     metrics = prometheus_metrics_create((char *[]) { "global" }, (char *[]) { "root" }, 1);
 
-    gauge1 = prometheus_metrics_add_gauge(metrics, "test_gauge1", "Test gauge1");
-    gauge2 = prometheus_metrics_add_gauge(metrics, "test_gauge2", "Test gauge2");
+    gauge1 = prometheus_metrics_create_gauge(metrics, "test_gauge1", "Test gauge1");
+    gauge2 = prometheus_metrics_create_gauge(metrics, "test_gauge2", "Test gauge2");
 
-    series11 = prometheus_gauge_add_series(gauge1, (const char *[]) { "test" }, (const char *[]) { "test1" }, 1);
-    series12 = prometheus_gauge_add_series(gauge1, (const char *[]) { "test" }, (const char *[]) { "test2" }, 1);
-    series21 = prometheus_gauge_add_series(gauge2, (const char *[]) { "test" }, (const char *[]) { "test1" }, 1);
-    series22 = prometheus_gauge_add_series(gauge2, (const char *[]) { "test" }, (const char *[]) { "test2" }, 1);
+    series11 = prometheus_gauge_create_series(gauge1, (const char *[]) { "test" }, (const char *[]) { "test1" }, 1);
+    series12 = prometheus_gauge_create_series(gauge1, (const char *[]) { "test" }, (const char *[]) { "test2" }, 1);
+    series21 = prometheus_gauge_create_series(gauge2, (const char *[]) { "test" }, (const char *[]) { "test1" }, 1);
+    series22 = prometheus_gauge_create_series(gauge2, (const char *[]) { "test" }, (const char *[]) { "test2" }, 1);
 
     instance11 = prometheus_gauge_series_create_instance(series11);
     instance12 = prometheus_gauge_series_create_instance(series12);
     instance21 = prometheus_gauge_series_create_instance(series21);
     instance22 = prometheus_gauge_series_create_instance(series22);
 
-    prometheus_gauge_instance_set(instance11, 100);
-    prometheus_gauge_instance_set(instance12, 200);
-    prometheus_gauge_instance_set(instance21, 300);
-    prometheus_gauge_instance_set(instance22, 400);
+    prometheus_gauge_set(instance11, 100);
+    prometheus_gauge_set(instance12, 200);
+    prometheus_gauge_set(instance21, 300);
+    prometheus_gauge_set(instance22, 400);
 
-    prometheus_gauge_instance_add(instance11, 10);
-    prometheus_gauge_instance_add(instance12, 20);
-    prometheus_gauge_instance_add(instance21, 30);
-    prometheus_gauge_instance_add(instance22, 40);
+    prometheus_gauge_add(instance11, 10);
+    prometheus_gauge_add(instance12, 20);
+    prometheus_gauge_add(instance21, 30);
+    prometheus_gauge_add(instance22, 40);
 
     prometheus_metrics_scrape(metrics, buffer, sizeof(buffer));
     printf("%s\n", buffer);

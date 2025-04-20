@@ -15,28 +15,28 @@ main(
 
     metrics = prometheus_metrics_create((char *[]) { "global" }, (char *[]) { "root" }, 1);
 
-    counter1 = prometheus_metrics_add_counter(metrics, "test_counter1", "Test counter1");
-    counter2 = prometheus_metrics_add_counter(metrics, "test_counter2", "Test counter2");
+    counter1 = prometheus_metrics_create_counter(metrics, "test_counter1", "Test counter1");
+    counter2 = prometheus_metrics_create_counter(metrics, "test_counter2", "Test counter2");
 
-    series11 = prometheus_counter_add_series(counter1, (const char *[]) { "test" }, (const char *[]) { "test1" }, 1);
-    series12 = prometheus_counter_add_series(counter1, (const char *[]) { "test" }, (const char *[]) { "test2" }, 1);
-    series21 = prometheus_counter_add_series(counter2, (const char *[]) { "test" }, (const char *[]) { "test1" }, 1);
-    series22 = prometheus_counter_add_series(counter2, (const char *[]) { "test" }, (const char *[]) { "test2" }, 1);
+    series11 = prometheus_counter_create_series(counter1, (const char *[]) { "test" }, (const char *[]) { "test1" }, 1);
+    series12 = prometheus_counter_create_series(counter1, (const char *[]) { "test" }, (const char *[]) { "test2" }, 1);
+    series21 = prometheus_counter_create_series(counter2, (const char *[]) { "test" }, (const char *[]) { "test1" }, 1);
+    series22 = prometheus_counter_create_series(counter2, (const char *[]) { "test" }, (const char *[]) { "test2" }, 1);
 
     instance11 = prometheus_counter_series_create_instance(series11);
     instance12 = prometheus_counter_series_create_instance(series12);
     instance21 = prometheus_counter_series_create_instance(series21);
     instance22 = prometheus_counter_series_create_instance(series22);
 
-    prometheus_counter_instance_increment(instance11);
-    prometheus_counter_instance_increment(instance12);
-    prometheus_counter_instance_increment(instance21);
-    prometheus_counter_instance_increment(instance22);
+    prometheus_counter_increment(instance11);
+    prometheus_counter_increment(instance12);
+    prometheus_counter_increment(instance21);
+    prometheus_counter_increment(instance22);
 
-    prometheus_counter_instance_add(instance11, 10);
-    prometheus_counter_instance_add(instance12, 20);
-    prometheus_counter_instance_add(instance21, 30);
-    prometheus_counter_instance_add(instance22, 40);
+    prometheus_counter_add(instance11, 10);
+    prometheus_counter_add(instance12, 20);
+    prometheus_counter_add(instance21, 30);
+    prometheus_counter_add(instance22, 40);
 
     prometheus_metrics_scrape(metrics, buffer, sizeof(buffer));
     printf("%s\n", buffer);

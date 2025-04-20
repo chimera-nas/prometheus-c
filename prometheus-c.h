@@ -49,44 +49,54 @@ int prometheus_metrics_scrape(
     int                        buffer_size);
 
 
-struct prometheus_counter * prometheus_metrics_add_counter(
+struct prometheus_counter * prometheus_metrics_create_counter(
     struct prometheus_metrics *metrics,
     const char                *name,
     const char                *help);
 
+void prometheus_counter_destroy(
+    struct prometheus_metrics *metrics,
+    struct prometheus_counter *counter);
 
-struct prometheus_counter_series * prometheus_counter_add_series(
-    struct prometheus_counter *base,
+struct prometheus_counter_series * prometheus_counter_create_series(
+    struct prometheus_counter *counter,
     const char               **label_names,
     const char               **label_values,
     int                        num_labels);
 
+void prometheus_counter_destroy_series(
+    struct prometheus_counter        *counter,
+    struct prometheus_counter_series *series);
 
 struct prometheus_counter_instance * prometheus_counter_series_create_instance(
     struct prometheus_counter_series *series);
 
+void prometheus_counter_series_destroy_instance(
+    struct prometheus_counter_series   *series,
+    struct prometheus_counter_instance *instance);
+
 static inline void
-prometheus_counter_instance_increment(struct prometheus_counter_instance *instance)
+prometheus_counter_increment(struct prometheus_counter_instance *instance)
 {
     instance->value++;
 } /* prometheus_counter_instance_increment */
 
 static inline void
-prometheus_counter_instance_add(
+prometheus_counter_add(
     struct prometheus_counter_instance *instance,
     uint64_t                            value)
 {
     instance->value += value;
 } /* prometheus_counter_instance_add */
 
-struct prometheus_gauge * prometheus_metrics_add_gauge(
+struct prometheus_gauge * prometheus_metrics_create_gauge(
     struct prometheus_metrics *metrics,
     const char                *name,
     const char                *help);
 
 
-struct prometheus_gauge_series * prometheus_gauge_add_series(
-    struct prometheus_gauge *base,
+struct prometheus_gauge_series * prometheus_gauge_create_series(
+    struct prometheus_gauge *gauge,
     const char             **label_names,
     const char             **label_values,
     int                      num_labels);
@@ -95,8 +105,12 @@ struct prometheus_gauge_series * prometheus_gauge_add_series(
 struct prometheus_gauge_instance * prometheus_gauge_series_create_instance(
     struct prometheus_gauge_series *series);
 
+void prometheus_gauge_series_destroy_instance(
+    struct prometheus_gauge_series   *series,
+    struct prometheus_gauge_instance *instance);
+
 static inline void
-prometheus_gauge_instance_set(
+prometheus_gauge_set(
     struct prometheus_gauge_instance *instance,
     int64_t                           value)
 {
@@ -104,7 +118,7 @@ prometheus_gauge_instance_set(
 } /* prometheus_gauge_instance_set */
 
 static inline void
-prometheus_gauge_instance_add(
+prometheus_gauge_add(
     struct prometheus_gauge_instance *instance,
     int64_t                           value)
 {
@@ -112,13 +126,13 @@ prometheus_gauge_instance_add(
 } /* prometheus_gauge_instance_add */
 
 
-struct prometheus_histogram * prometheus_metrics_add_histogram_exponential(
+struct prometheus_histogram * prometheus_metrics_create_histogram_exponential(
     struct prometheus_metrics *metrics,
     const char                *name,
     const char                *help,
     uint64_t                   count);
 
-struct prometheus_histogram * prometheus_metrics_add_histogram_linear(
+struct prometheus_histogram * prometheus_metrics_create_histogram_linear(
     struct prometheus_metrics *metrics,
     const char                *name,
     const char                *help,
@@ -127,7 +141,7 @@ struct prometheus_histogram * prometheus_metrics_add_histogram_linear(
     uint64_t                   count);
 
 
-struct prometheus_histogram_series * prometheus_histogram_add_series(
+struct prometheus_histogram_series * prometheus_histogram_create_series(
     struct prometheus_histogram *base,
     const char                 **label_names,
     const char                 **label_values,
@@ -137,8 +151,12 @@ struct prometheus_histogram_series * prometheus_histogram_add_series(
 struct prometheus_histogram_instance * prometheus_histogram_series_create_instance(
     struct prometheus_histogram_series *series);
 
+void prometheus_histogram_series_destroy_instance(
+    struct prometheus_histogram_series   *series,
+    struct prometheus_histogram_instance *instance);
+
 static inline void
-prometheus_histogram_instance_sample(
+prometheus_histogram_sample(
     struct prometheus_histogram_instance *instance,
     int64_t                               value)
 {
