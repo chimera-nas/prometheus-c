@@ -91,8 +91,7 @@ The task of serving the scraped metrics string via HTTP or pushing it to a prome
 project itself include:
 
 
-https://github.com/chimera-nas/stupid-httpd is a very simple single thread
-ed httpd server meant only for serving something like prometheus metrics in an insecure way.
+https://github.com/chimera-nas/stupid-httpd is a very simple single threaded httpd server meant only for serving something like prometheus metrics in an insecure way.
 
 https://github.com/chimera-nas/libevpl is a high performance networking library that includes an httpd server component.
 
