@@ -308,7 +308,9 @@ prometheus_metrics_emit_series_base(
     struct prometheus_metrics     *metrics,
     const char                    *metric_suffix,
     struct prometheus_metric_base *metric_base,
-    struct prometheus_series_base *series_base)
+    struct prometheus_series_base *series_base,
+    const char                    *label_name,
+    const char                    *label_value)
 {
     int i;
 
@@ -320,6 +322,10 @@ prometheus_metrics_emit_series_base(
 
     for (i = 0; i < series_base->label_count; i++) {
         bp += sprintf(bp, "%s=\"%s\",", series_base->label_names[i], series_base->label_values[i]);
+    }
+
+    if (label_name && label_value) {
+        bp += sprintf(bp, "%s=\"%s\",", label_name, label_value);
     }
 
     if (*(bp - 1) == ',') {
@@ -347,7 +353,7 @@ prometheus_metrics_scrape(
     struct prometheus_histogram        *histogram;
     struct prometheus_histogram_series *histogram_series;
     struct prometheus_histogram_handle *histogram_hdl;
-    char                                histogram_suffix[64];
+    char                                bucket_threshold[64];
     uint64_t                            value, sum, total;
     int                                 i;
     char                               *bp = buffer;
@@ -380,7 +386,8 @@ prometheus_metrics_scrape(
 
             }
 
-            bp = prometheus_metrics_emit_series_base(bp, metrics, "", &counter->base, &counter_series->base);
+            bp = prometheus_metrics_emit_series_base(bp, metrics, "",
+                                                     &counter->base, &counter_series->base, NULL, NULL);
 
             bp += sprintf(bp, "%lu\n", value);
 
@@ -410,7 +417,8 @@ prometheus_metrics_scrape(
                 value += gauge_hdl->gauge.value;
             }
 
-            bp = prometheus_metrics_emit_series_base(bp, metrics, "", &gauge->base, &gauge_series->base);
+            bp = prometheus_metrics_emit_series_base(bp, metrics, "",
+                                                     &gauge->base, &gauge_series->base, NULL, NULL);
 
             bp += sprintf(bp, "%lu\n", value);
 
@@ -442,21 +450,19 @@ prometheus_metrics_scrape(
 
                 if (i + 1 < histogram->count) {
                     if (histogram->type == PROMETHEUS_HISTOGRAM_EXPONENTIAL) {
-                        snprintf(histogram_suffix, sizeof(histogram_suffix), "_bucket{le=\"%lu\"}", (1UL << (i + 1)));
+                        snprintf(bucket_threshold, sizeof(bucket_threshold), "%lu", (1UL << (i + 1)));
                     } else {
-                        snprintf(histogram_suffix, sizeof(histogram_suffix), "_bucket{le=\"%lu\"}", histogram->start +
+                        snprintf(bucket_threshold, sizeof(bucket_threshold), "%lu", histogram->start +
                                  histogram->increment * (i + 1));
                     }
                 } else {
-                    snprintf(histogram_suffix, sizeof(histogram_suffix), "_bucket{le=\"+Inf\"}");
+                    snprintf(bucket_threshold, sizeof(bucket_threshold), "+Inf");
                 }
 
-                bp = prometheus_metrics_emit_series_base(bp, metrics, histogram_suffix, &histogram->base, &
-                                                         histogram_series->base);
+                bp = prometheus_metrics_emit_series_base(bp, metrics, "_bucket", &histogram->base, &
+                                                         histogram_series->base, "le", bucket_threshold);
 
                 bp += sprintf(bp, "%lu\n", histogram_series->buckets[i]);
-
-                fprintf(stderr, "%s\n", buffer);
             }
 
 
@@ -469,11 +475,13 @@ prometheus_metrics_scrape(
                 total += histogram_hdl->histogram.count;
             }
 
-            bp = prometheus_metrics_emit_series_base(bp, metrics, "_sum", &histogram->base, &histogram_series->base);
+            bp = prometheus_metrics_emit_series_base(bp, metrics, "_sum",
+                                                     &histogram->base, &histogram_series->base, NULL, NULL);
 
             bp += sprintf(bp, "%lu\n", sum);
 
-            bp = prometheus_metrics_emit_series_base(bp, metrics, "_count", &histogram->base, &histogram_series->base);
+            bp = prometheus_metrics_emit_series_base(bp, metrics, "_count",
+                                                     &histogram->base, &histogram_series->base, NULL, NULL);
 
             bp += sprintf(bp, "%lu\n", total);
 

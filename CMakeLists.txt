@@ -9,6 +9,8 @@ add_library(prometheus-c SHARED
 
 target_link_libraries(prometheus-c pthread m)
 
+install(TARGETS prometheus-c DESTINATION lib)
+
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 add_subdirectory(tests)
