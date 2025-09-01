@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2025 Ben Jarvis
+
+SPDX-License-Identifier: LGPL-2.1-only
+-->
+
 # prometheus-c
 
 This is a C library intended to facilitate exposition of Prometheus (or OpenMetrics) style metrics from a C program/daemon.
