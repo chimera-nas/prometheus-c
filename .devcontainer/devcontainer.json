@@ -1,0 +1,30 @@
+{
+        "name": "prometheus-c",
+        "build": {
+                "dockerfile": "Dockerfile"
+        },
+        "customizations": {
+                "vscode": {
+                        "settings": {},
+                        "extensions": [
+                                "anysphere.cpptools",
+                                "ms-vscode.cmake-tools",
+                                "fredericbonnet.cmake-test-adapter",
+                                "ms-azuretools.vscode-docker",
+                                "benjarvis.uncrustify",
+                                "anthropic.claude-code"
+                        ]
+                }
+        },
+        "mounts": [
+                "source=prometheus-c-build,target=/build,type=volume"
+        ],
+        "appPort": [],
+        "forwardPorts": [],
+        "privileged": true,
+        "remoteEnv": {
+                "PROMETHEUS_C_BUILD_DIR": "/build"
+        },
+        "workspaceMount": "source=${localWorkspaceFolder},target=/prometheus-c,type=bind",
+        "workspaceFolder": "/prometheus-c"
+}
