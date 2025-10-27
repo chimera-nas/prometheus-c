@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: LGPL-2.1-only
 
-project(prometheus-c)
+project(prometheus-c LANGUAGES C)
 
 add_definitions(-O3 -Wall -Werror -fvisibility=hidden)
 
