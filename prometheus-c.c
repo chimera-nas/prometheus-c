@@ -357,7 +357,7 @@ prometheus_metrics_scrape(
     struct prometheus_histogram_series *histogram_series;
     struct prometheus_histogram_handle *histogram_hdl;
     char                                bucket_threshold[64];
-    uint64_t                            value, sum, total;
+    uint64_t                            value, sum, total, cumulative;
     int                                 i;
     char                               *bp = buffer;
 
@@ -442,6 +442,8 @@ prometheus_metrics_scrape(
         {
             pthread_mutex_lock(&histogram_series->lock);
 
+            cumulative = 0;
+
             for (i = 0; i < histogram->count; i++) {
 
                 histogram_series->buckets[i] = histogram_series->saved[i];
@@ -451,9 +453,19 @@ prometheus_metrics_scrape(
                     histogram_series->buckets[i] += histogram_hdl->histogram.buckets[i];
                 }
 
+                /* Prometheus bucket counts are cumulative (le = "less than or
+                 * equal"), so each bucket reports all observations up to and
+                 * including its boundary; the final +Inf bucket equals _count.
+                 */
+                cumulative += histogram_series->buckets[i];
+
                 if (i + 1 < histogram->count) {
                     if (histogram->type == PROMETHEUS_HISTOGRAM_EXPONENTIAL) {
                         snprintf(bucket_threshold, sizeof(bucket_threshold), "%lu", (1UL << (i + 1)));
+                    } else if (histogram->type == PROMETHEUS_HISTOGRAM_TIME) {
+                        /* Power-of-two tick boundary converted to nanoseconds. */
+                        snprintf(bucket_threshold, sizeof(bucket_threshold), "%lu",
+                                 stopwatch_ticks_to_ns(&prometheus_stopwatch_ctx, 1UL << (i + 1)));
                     } else {
                         snprintf(bucket_threshold, sizeof(bucket_threshold), "%lu", histogram->start +
                                  histogram->increment * (i + 1));
@@ -465,7 +477,7 @@ prometheus_metrics_scrape(
                 bp = prometheus_metrics_emit_series_base(bp, metrics, "_bucket", &histogram->base, &
                                                          histogram_series->base, "le", bucket_threshold);
 
-                bp += sprintf(bp, "%lu\n", histogram_series->buckets[i]);
+                bp += sprintf(bp, "%lu\n", cumulative);
             }
 
 
@@ -481,7 +493,12 @@ prometheus_metrics_scrape(
             bp = prometheus_metrics_emit_series_base(bp, metrics, "_sum",
                                                      &histogram->base, &histogram_series->base, NULL, NULL);
 
-            bp += sprintf(bp, "%lu\n", sum);
+            if (histogram->type == PROMETHEUS_HISTOGRAM_TIME) {
+                bp += sprintf(bp, "%lu\n",
+                              stopwatch_ticks_to_ns(&prometheus_stopwatch_ctx, sum));
+            } else {
+                bp += sprintf(bp, "%lu\n", sum);
+            }
 
             bp = prometheus_metrics_emit_series_base(bp, metrics, "_count",
                                                      &histogram->base, &histogram_series->base, NULL, NULL);
@@ -690,6 +707,48 @@ prometheus_metrics_create_histogram_exponential(
     return histogram;
 } /* prometheus_metrics_add_histogram */
 
+PUBLIC struct stopwatch_context prometheus_stopwatch_ctx;
+
+static pthread_once_t           prometheus_stopwatch_once = PTHREAD_ONCE_INIT;
+
+static void
+prometheus_stopwatch_ctx_init(void)
+{
+    stopwatch_context_init(&prometheus_stopwatch_ctx);
+} /* prometheus_stopwatch_ctx_init */
+
+PUBLIC struct prometheus_histogram *
+prometheus_metrics_create_histogram_time(
+    struct prometheus_metrics *metrics,
+    const char                *name,
+    const char                *help,
+    uint64_t                   count)
+{
+    struct prometheus_histogram *histogram;
+
+    if (!prometheus_string_legal_name(name)) {
+        return NULL;
+    }
+
+    pthread_once(&prometheus_stopwatch_once, prometheus_stopwatch_ctx_init);
+
+    pthread_mutex_lock(&metrics->lock);
+
+    histogram = prometheus_calloc(1, sizeof(*histogram));
+
+    prometheus_metric_base_init(&histogram->base, name, help, "histogram");
+
+    histogram->type  = PROMETHEUS_HISTOGRAM_TIME;
+    histogram->count = count;
+
+    pthread_mutex_init(&histogram->lock, NULL);
+
+    list_append(metrics->histograms, histogram);
+
+    pthread_mutex_unlock(&metrics->lock);
+
+    return histogram;
+} /* prometheus_metrics_create_histogram_time */
 
 PUBLIC struct prometheus_histogram *
 prometheus_metrics_create_histogram_linear(

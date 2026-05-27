@@ -42,12 +42,12 @@ clean:
 
 .PHONY: syntax-check
 syntax-check:
-	@find . -type f \( -name "*.c" -o -name "*.h" \) -print0 | \
+	@find . -type f \( -name "*.c" -o -name "*.h" \) -not -path './ext/*' -print0 | \
                 xargs -0 -I {} sh -c 'uncrustify -c etc/uncrustify.cfg --check {} >/dev/null 2>&1 || (echo "Formatting issue in: {}" && exit 1)' || exit 1
 
 
 .PHONY: syntax
 syntax:
-	@find . -type f \( -name "*.c" -o -name "*.h" \) -print0 | \
+	@find . -type f \( -name "*.c" -o -name "*.h" \) -not -path './ext/*' -print0 | \
                 xargs -0 -I {} sh -c 'uncrustify -c etc/uncrustify.cfg --replace --no-backup {}' >/dev/null 2>&1
 		

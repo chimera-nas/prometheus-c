@@ -13,6 +13,13 @@ add_library(prometheus-c SHARED
 
 target_link_libraries(prometheus-c pthread m)
 
+# prometheus-c.h includes stopwatch.h, so the stopwatch include path must
+# propagate (PUBLIC) to every downstream consumer of this library.
+target_include_directories(prometheus-c PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/ext/stopwatch
+)
+
 install(TARGETS prometheus-c DESTINATION lib)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})

@@ -5,6 +5,8 @@
 #pragma once
 
 #include <stdint.h>
+#include "stopwatch.h"
+
 struct prometheus_metrics;
 
 struct prometheus_counter;
@@ -27,6 +29,13 @@ struct prometheus_histogram_series;
 enum prometheus_histogram_type {
     PROMETHEUS_HISTOGRAM_EXPONENTIAL,
     PROMETHEUS_HISTOGRAM_LINEAR,
+    /*
+     * Time histogram: buckets are accumulated in raw stopwatch ticks (TSC
+     * cycles where available) using the same power-of-two scheme as
+     * EXPONENTIAL. Bucket boundaries and the sum are converted to
+     * nanoseconds only at scrape time.
+     */
+    PROMETHEUS_HISTOGRAM_TIME,
 };
 
 struct prometheus_histogram_instance {
@@ -152,6 +161,20 @@ struct prometheus_histogram * prometheus_metrics_create_histogram_linear(
     uint64_t                   increment,
     uint64_t                   count);
 
+/*
+ * Create a time histogram. Samples are taken with a stopwatch (see
+ * prometheus_stopwatch below) and bucketed in raw ticks; bucket boundaries
+ * (le) and the sum are reported in nanoseconds at scrape time. `count` is
+ * the number of power-of-two tick buckets (~33 spans nanoseconds to ~1s).
+ *
+ * The first call initializes a process-wide stopwatch context.
+ */
+struct prometheus_histogram * prometheus_metrics_create_histogram_time(
+    struct prometheus_metrics *metrics,
+    const char                *name,
+    const char                *help,
+    uint64_t                   count);
+
 void prometheus_histogram_destroy(
     struct prometheus_metrics   *metrics,
     struct prometheus_histogram *histogram);
@@ -197,4 +220,64 @@ prometheus_histogram_sample(
     instance->sum += value;
     instance->count++;
 } /* prometheus_histogram_instance_sample */
+
+/*
+ * Time histogram support.
+ *
+ * A prometheus_stopwatch is a caller-owned timing handle. Embed it in the
+ * context that lives for the duration of the operation being timed (no heap
+ * allocation, no locks), start it at the beginning, and sample it into a time
+ * histogram instance at the end:
+ *
+ *   struct prometheus_stopwatch sw;
+ *   prometheus_stopwatch_start(&sw);
+ *   ... operation ...
+ *   prometheus_time_histogram_sample(instance, &sw);
+ */
+struct prometheus_stopwatch {
+    struct stopwatch sw;
+};
+
+/*
+ * Process-wide stopwatch context. Initialized (once) by
+ * prometheus_metrics_create_histogram_time(); read-only thereafter, so the
+ * start/sample hot path takes no locks.
+ */
+extern struct stopwatch_context prometheus_stopwatch_ctx;
+
+static inline void
+prometheus_stopwatch_start(struct prometheus_stopwatch *sw)
+{
+    stopwatch_start(&prometheus_stopwatch_ctx, &sw->sw);
+} /* prometheus_stopwatch_start */
+
+/* Elapsed nanoseconds since the stopwatch was started, for callers that need
+ * the value directly (e.g. logging) in addition to histogram sampling.
+ */
+static inline uint64_t
+prometheus_stopwatch_elapsed_ns(struct prometheus_stopwatch *sw)
+{
+    return stopwatch_elapsed_ns(&prometheus_stopwatch_ctx, &sw->sw);
+} /* prometheus_stopwatch_elapsed_ns */
+
+static inline void
+prometheus_time_histogram_sample(
+    struct prometheus_histogram_instance *instance,
+    struct prometheus_stopwatch          *sw)
+{
+    uint64_t ticks = stopwatch_read_ticks(&prometheus_stopwatch_ctx, &sw->sw);
+
+    /* Same power-of-two bucketing as EXPONENTIAL, but on raw ticks.
+     * __builtin_clzll(0) is undefined, so a zero-tick delta maps to bucket 0.
+     */
+    uint64_t i = ticks ? (uint64_t) (63 - __builtin_clzll(ticks)) : 0;
+
+    if (i >= instance->num_buckets) {
+        i = instance->num_buckets - 1;
+    }
+
+    instance->buckets[i]++;
+    instance->sum += ticks;
+    instance->count++;
+} /* prometheus_time_histogram_sample */
 
