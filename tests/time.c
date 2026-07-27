@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: LGPL-2.1-only
 
 #include <stdio.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <time.h>
 #include "prometheus-c.h"
@@ -50,7 +51,7 @@ main(
 
     /* The instance is a plain per-owner accumulator; check it directly. */
     if (instance->count != NUM_SAMPLES) {
-        fprintf(stderr, "expected count %d, got %lu\n", NUM_SAMPLES, instance->count);
+        fprintf(stderr, "expected count %d, got %" PRIu64 "\n", NUM_SAMPLES, instance->count);
         return 1;
     }
 
