@@ -9,6 +9,8 @@
 #include <ctype.h>
 #include <math.h>
 #include <stddef.h>
+#include <stdarg.h>
+#include <inttypes.h>
 #include "prometheus-c.h"
 
 #define PUBLIC __attribute__((visibility("default")))
@@ -294,13 +296,52 @@ prometheus_series_base_init(
     }
 } /* prometheus_series_base_init */
 
+/*
+ * Bounded append to the scrape buffer.
+ *
+ * Returns the new write position, or NULL once the output no longer fits.  A
+ * NULL bp is sticky: every subsequent emit is a no-op, so callers can keep
+ * walking their lists (and unlocking as they go) and report the overflow once,
+ * at the end, instead of unwinding mid-iteration.
+ */
+static inline char *
+prometheus_emit(
+    char       *bp,
+    const char *end,
+    const char *fmt,
+    ...)
+{
+    va_list ap;
+    size_t  avail;
+    int     len;
+
+    if (!bp) {
+        return NULL;
+    }
+
+    avail = (size_t) (end - bp);
+
+    va_start(ap, fmt);
+    len = vsnprintf(bp, avail, fmt, ap);
+    va_end(ap);
+
+    /* vsnprintf returns the length it *would* have written, so len >= avail
+     * means the text was truncated and the buffer is exhausted. */
+    if (len < 0 || (size_t) len >= avail) {
+        return NULL;
+    }
+
+    return bp + len;
+} /* prometheus_emit */
+
 static inline char *
 prometheus_metrics_emit_base(
     char                          *bp,
+    const char                    *end,
     struct prometheus_metric_base *base)
 {
-    bp += sprintf(bp, "# HELP %s %s\n", base->name, base->help);
-    bp += sprintf(bp, "# TYPE %s %s\n", base->name, base->type);
+    bp = prometheus_emit(bp, end, "# HELP %s %s\n", base->name, base->help);
+    bp = prometheus_emit(bp, end, "# TYPE %s %s\n", base->name, base->type);
 
     return bp;
 } /* prometheus_metrics_emit_base */
@@ -308,6 +349,7 @@ prometheus_metrics_emit_base(
 static inline char *
 prometheus_metrics_emit_series_base(
     char                          *bp,
+    const char                    *end,
     struct prometheus_metrics     *metrics,
     const char                    *metric_suffix,
     struct prometheus_metric_base *metric_base,
@@ -317,26 +359,28 @@ prometheus_metrics_emit_series_base(
 {
     int i;
 
-    bp += sprintf(bp, "%s%s{", metric_base->name, metric_suffix);
+    bp = prometheus_emit(bp, end, "%s%s{", metric_base->name, metric_suffix);
 
     for (i = 0; i < metrics->label_count; i++) {
-        bp += sprintf(bp, "%s=\"%s\",", metrics->label_names[i], metrics->label_values[i]);
+        bp = prometheus_emit(bp, end, "%s=\"%s\",", metrics->label_names[i], metrics->label_values[i]);
     }
 
     for (i = 0; i < series_base->label_count; i++) {
-        bp += sprintf(bp, "%s=\"%s\",", series_base->label_names[i], series_base->label_values[i]);
+        bp = prometheus_emit(bp, end, "%s=\"%s\",", series_base->label_names[i], series_base->label_values[i]);
     }
 
     if (label_name && label_value) {
-        bp += sprintf(bp, "%s=\"%s\",", label_name, label_value);
+        bp = prometheus_emit(bp, end, "%s=\"%s\",", label_name, label_value);
     }
 
-    if (*(bp - 1) == ',') {
+    /* Drop the trailing separator left by the last label, if any.  Guarded on
+     * bp because an overflow above leaves it NULL. */
+    if (bp && *(bp - 1) == ',') {
         bp--;
         *bp = '\0';
     }
 
-    bp += sprintf(bp, "} ");
+    bp = prometheus_emit(bp, end, "} ");
 
     return bp;
 } /* prometheus_metrics_emit_series_base */
@@ -359,13 +403,19 @@ prometheus_metrics_scrape(
     char                                bucket_threshold[64];
     uint64_t                            value, sum, total, cumulative;
     int                                 i;
-    char                               *bp = buffer;
+    char                               *bp;
+    const char                         *end;
 
-    *bp = '\0';
-
-    if (!metrics || !buffer || !buffer_size) {
+    /* Validate before touching the buffer -- the old code NUL-terminated it
+     * first and so dereferenced a NULL buffer before rejecting it. */
+    if (!metrics || !buffer || buffer_size <= 0) {
         return -1;
     }
+
+    bp  = buffer;
+    end = buffer + buffer_size;
+
+    *bp = '\0';
 
 
     pthread_mutex_lock(&metrics->lock);
@@ -375,7 +425,7 @@ prometheus_metrics_scrape(
 
         pthread_mutex_lock(&counter->lock);
 
-        bp = prometheus_metrics_emit_base(bp, &counter->base);
+        bp = prometheus_metrics_emit_base(bp, end, &counter->base);
 
         list_foreach(counter->series, counter_series)
         {
@@ -389,16 +439,15 @@ prometheus_metrics_scrape(
 
             }
 
-            bp = prometheus_metrics_emit_series_base(bp, metrics, "",
+            bp = prometheus_metrics_emit_series_base(bp, end, metrics, "",
                                                      &counter->base, &counter_series->base, NULL, NULL);
 
-            bp += sprintf(bp, "%lu\n", value);
+            bp = prometheus_emit(bp, end, "%" PRIu64 "\n", value);
 
             pthread_mutex_unlock(&counter_series->lock);
         }
 
-        *bp++ = '\n';
-        *bp   = '\0';
+        bp = prometheus_emit(bp, end, "\n");
 
         pthread_mutex_unlock(&counter->lock);
     }
@@ -407,7 +456,7 @@ prometheus_metrics_scrape(
     {
         pthread_mutex_lock(&gauge->lock);
 
-        bp = prometheus_metrics_emit_base(bp, &gauge->base);
+        bp = prometheus_metrics_emit_base(bp, end, &gauge->base);
 
         list_foreach(gauge->series, gauge_series)
         {
@@ -420,10 +469,10 @@ prometheus_metrics_scrape(
                 value += gauge_hdl->gauge.value;
             }
 
-            bp = prometheus_metrics_emit_series_base(bp, metrics, "",
+            bp = prometheus_metrics_emit_series_base(bp, end, metrics, "",
                                                      &gauge->base, &gauge_series->base, NULL, NULL);
 
-            bp += sprintf(bp, "%lu\n", value);
+            bp = prometheus_emit(bp, end, "%" PRIu64 "\n", value);
 
             pthread_mutex_unlock(&gauge_series->lock);
 
@@ -436,7 +485,7 @@ prometheus_metrics_scrape(
     {
         pthread_mutex_lock(&histogram->lock);
 
-        bp = prometheus_metrics_emit_base(bp, &histogram->base);
+        bp = prometheus_metrics_emit_base(bp, end, &histogram->base);
 
         list_foreach(histogram->series, histogram_series)
         {
@@ -464,20 +513,20 @@ prometheus_metrics_scrape(
                         snprintf(bucket_threshold, sizeof(bucket_threshold), "%lu", (1UL << (i + 1)));
                     } else if (histogram->type == PROMETHEUS_HISTOGRAM_TIME) {
                         /* Power-of-two tick boundary converted to nanoseconds. */
-                        snprintf(bucket_threshold, sizeof(bucket_threshold), "%lu",
+                        snprintf(bucket_threshold, sizeof(bucket_threshold), "%" PRIu64,
                                  stopwatch_ticks_to_ns(&prometheus_stopwatch_ctx, 1UL << (i + 1)));
                     } else {
-                        snprintf(bucket_threshold, sizeof(bucket_threshold), "%lu", histogram->start +
+                        snprintf(bucket_threshold, sizeof(bucket_threshold), "%" PRIu64, histogram->start +
                                  histogram->increment * (i + 1));
                     }
                 } else {
                     snprintf(bucket_threshold, sizeof(bucket_threshold), "+Inf");
                 }
 
-                bp = prometheus_metrics_emit_series_base(bp, metrics, "_bucket", &histogram->base, &
+                bp = prometheus_metrics_emit_series_base(bp, end, metrics, "_bucket", &histogram->base, &
                                                          histogram_series->base, "le", bucket_threshold);
 
-                bp += sprintf(bp, "%lu\n", cumulative);
+                bp = prometheus_emit(bp, end, "%" PRIu64 "\n", cumulative);
             }
 
 
@@ -490,33 +539,39 @@ prometheus_metrics_scrape(
                 total += histogram_hdl->histogram.count;
             }
 
-            bp = prometheus_metrics_emit_series_base(bp, metrics, "_sum",
+            bp = prometheus_metrics_emit_series_base(bp, end, metrics, "_sum",
                                                      &histogram->base, &histogram_series->base, NULL, NULL);
 
             if (histogram->type == PROMETHEUS_HISTOGRAM_TIME) {
-                bp += sprintf(bp, "%lu\n",
-                              stopwatch_ticks_to_ns(&prometheus_stopwatch_ctx, sum));
+                bp = prometheus_emit(bp, end, "%" PRIu64 "\n",
+                                     stopwatch_ticks_to_ns(&prometheus_stopwatch_ctx, sum));
             } else {
-                bp += sprintf(bp, "%lu\n", sum);
+                bp = prometheus_emit(bp, end, "%" PRIu64 "\n", sum);
             }
 
-            bp = prometheus_metrics_emit_series_base(bp, metrics, "_count",
+            bp = prometheus_metrics_emit_series_base(bp, end, metrics, "_count",
                                                      &histogram->base, &histogram_series->base, NULL, NULL);
 
-            bp += sprintf(bp, "%lu\n", total);
+            bp = prometheus_emit(bp, end, "%" PRIu64 "\n", total);
 
             pthread_mutex_unlock(&histogram_series->lock);
         }
 
-        *bp++ = '\n';
-        *bp   = '\0';
+        bp = prometheus_emit(bp, end, "\n");
 
         pthread_mutex_unlock(&histogram->lock);
     }
 
     pthread_mutex_unlock(&metrics->lock);
 
-    return bp - buffer;
+    /* A NULL bp means some emit above did not fit.  The buffer holds a
+     * truncated but still NUL-terminated prefix; report the overflow so the
+     * caller can retry with a larger buffer rather than scrape partial data. */
+    if (!bp) {
+        return -1;
+    }
+
+    return (int) (bp - buffer);
 } /* prometheus_metrics_scrape */
 
 PUBLIC struct prometheus_counter *
