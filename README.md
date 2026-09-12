@@ -337,3 +337,20 @@ void prometheus_histogram_sample(
     int64_t                               value);
 ```
 
+
+## Native Windows builds
+
+Initialize submodules, then use Visual Studio 2022 / Build Tools with the C++
+workload and Windows SDK. No pthread compatibility library is required.
+
+```powershell
+git submodule update --init --recursive
+cmake -S . -B build -G "Visual Studio 17 2022" -A ARM64
+cmake --build build --config Release --parallel 4
+ctest --test-dir build -C Release --output-on-failure
+cmake --install build --config Release --prefix install
+```
+
+Use `-A x64` on Intel/AMD Windows. The install tree contains the DLL in `bin`,
+its import library in `lib`, and both public headers in `include`. Put the DLL
+beside your executable or on PATH. Timing uses the shared stopwatch QPC backend.
