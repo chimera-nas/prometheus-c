@@ -42,10 +42,15 @@ main(
     instance = prometheus_histogram_series_create_instance(series);
 
     for (i = 0; i < NUM_SAMPLES; i++) {
-        struct timespec req = { .tv_sec = 0, .tv_nsec = 1000000 }; /* 1 ms */
+
 
         prometheus_stopwatch_start(&sw);
+#ifdef _WIN32
+        Sleep(1);
+#else  /* ifdef _WIN32 */
+        struct timespec req = { .tv_sec = 0, .tv_nsec = 1000000 };
         nanosleep(&req, NULL);
+#endif /* ifdef _WIN32 */
         prometheus_time_histogram_sample(instance, &sw);
     }
 

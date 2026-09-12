@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
+#include "prometheus-platform.h"
 #include <ctype.h>
 #include <math.h>
 #include <stddef.h>
@@ -13,7 +13,7 @@
 #include <inttypes.h>
 #include "prometheus-c.h"
 
-#define PUBLIC __attribute__((visibility("default")))
+#define PUBLIC PROMETHEUS_API
 
 #define container_of(ptr, type, member) \
         ((type *) ((char *) (ptr) - offsetof(type, member)))
@@ -64,15 +64,15 @@ struct prometheus_series_base {
     int    label_count;
 };
 
-struct prometheus_counter_handle {
+struct PROMETHEUS_ALIGN prometheus_counter_handle {
     struct prometheus_counter_instance counter;
     struct prometheus_counter_handle  *prev;
     struct prometheus_counter_handle  *next;
-} __attribute__((aligned(64)));
+};
 
 struct prometheus_counter_series {
     struct prometheus_series_base     base;
-    pthread_mutex_t                   lock;
+    prometheus_mutex                  lock;
     uint64_t                          saved;
     struct prometheus_counter_handle *head;
     struct prometheus_counter_series *prev;
@@ -82,21 +82,21 @@ struct prometheus_counter_series {
 
 struct prometheus_counter {
     struct prometheus_metric_base     base;
-    pthread_mutex_t                   lock;
+    prometheus_mutex                  lock;
     struct prometheus_counter_series *series;
     struct prometheus_counter        *prev;
     struct prometheus_counter        *next;
 };
 
-struct prometheus_gauge_handle {
+struct PROMETHEUS_ALIGN prometheus_gauge_handle {
     struct prometheus_gauge_instance gauge;
     struct prometheus_gauge_handle  *prev;
     struct prometheus_gauge_handle  *next;
-} __attribute__((aligned(64)));
+};
 
 struct prometheus_gauge_series {
     struct prometheus_series_base   base;
-    pthread_mutex_t                 lock;
+    prometheus_mutex                lock;
     uint64_t                        saved;
     struct prometheus_gauge_handle *head;
     struct prometheus_gauge_series *prev;
@@ -105,21 +105,21 @@ struct prometheus_gauge_series {
 
 struct prometheus_gauge {
     struct prometheus_metric_base   base;
-    pthread_mutex_t                 lock;
+    prometheus_mutex                lock;
     struct prometheus_gauge_series *series;
     struct prometheus_gauge        *prev;
     struct prometheus_gauge        *next;
 };
 
-struct prometheus_histogram_handle {
+struct PROMETHEUS_ALIGN prometheus_histogram_handle {
     struct prometheus_histogram_instance histogram;
     struct prometheus_histogram_handle  *prev;
     struct prometheus_histogram_handle  *next;
-} __attribute__((aligned(64)));
+};
 
 struct prometheus_histogram_series {
     struct prometheus_series_base       base;
-    pthread_mutex_t                     lock;
+    prometheus_mutex                    lock;
     uint64_t                           *buckets;
     uint64_t                           *saved;
     uint64_t                            saved_sum;
@@ -135,7 +135,7 @@ struct prometheus_histogram_series {
 
 struct prometheus_histogram {
     struct prometheus_metric_base       base;
-    pthread_mutex_t                     lock;
+    prometheus_mutex                    lock;
     struct prometheus_histogram_series *series;
     struct prometheus_histogram        *prev;
     struct prometheus_histogram        *next;
@@ -152,7 +152,7 @@ struct prometheus_metrics {
     char                       **label_names;
     char                       **label_values;
     int                          label_count;
-    pthread_mutex_t              lock;
+    prometheus_mutex             lock;
 };
 
 static inline int
@@ -193,7 +193,7 @@ prometheus_string_legal_value(const char *str)
 
 static inline void *
 prometheus_calloc(
-    int    n,
+    size_t n,
     size_t size)
 {
     void *ptr = calloc(n, size);
@@ -208,9 +208,9 @@ prometheus_calloc(
 static inline char *
 prometheus_strdup(const char *str)
 {
-    int   len = strlen(str);
+    size_t len = strlen(str);
 
-    char *ptr = malloc(len + 1);
+    char  *ptr = malloc(len + 1);
 
     if (!ptr) {
         abort();
@@ -240,7 +240,7 @@ prometheus_metrics_create(
         metrics->label_values[i] = prometheus_strdup(label_values[i]);
     }
 
-    pthread_mutex_init(&metrics->lock, NULL);
+    prometheus_mutex_init(&metrics->lock);
 
     return metrics;
 } /* prometheus_metrics_create */
@@ -402,7 +402,7 @@ prometheus_metrics_scrape(
     struct prometheus_histogram_handle *histogram_hdl;
     char                                bucket_threshold[64];
     uint64_t                            value, sum, total, cumulative;
-    int                                 i;
+    uint64_t                            i;
     char                               *bp;
     const char                         *end;
 
@@ -418,18 +418,18 @@ prometheus_metrics_scrape(
     *bp = '\0';
 
 
-    pthread_mutex_lock(&metrics->lock);
+    prometheus_mutex_lock(&metrics->lock);
 
     list_foreach(metrics->counters, counter)
     {
 
-        pthread_mutex_lock(&counter->lock);
+        prometheus_mutex_lock(&counter->lock);
 
         bp = prometheus_metrics_emit_base(bp, end, &counter->base);
 
         list_foreach(counter->series, counter_series)
         {
-            pthread_mutex_lock(&counter_series->lock);
+            prometheus_mutex_lock(&counter_series->lock);
 
             value = counter_series->saved;
 
@@ -444,23 +444,23 @@ prometheus_metrics_scrape(
 
             bp = prometheus_emit(bp, end, "%" PRIu64 "\n", value);
 
-            pthread_mutex_unlock(&counter_series->lock);
+            prometheus_mutex_unlock(&counter_series->lock);
         }
 
         bp = prometheus_emit(bp, end, "\n");
 
-        pthread_mutex_unlock(&counter->lock);
+        prometheus_mutex_unlock(&counter->lock);
     }
 
     list_foreach(metrics->gauges, gauge)
     {
-        pthread_mutex_lock(&gauge->lock);
+        prometheus_mutex_lock(&gauge->lock);
 
         bp = prometheus_metrics_emit_base(bp, end, &gauge->base);
 
         list_foreach(gauge->series, gauge_series)
         {
-            pthread_mutex_lock(&gauge_series->lock);
+            prometheus_mutex_lock(&gauge_series->lock);
 
             value = gauge_series->saved;
 
@@ -474,22 +474,22 @@ prometheus_metrics_scrape(
 
             bp = prometheus_emit(bp, end, "%" PRIu64 "\n", value);
 
-            pthread_mutex_unlock(&gauge_series->lock);
+            prometheus_mutex_unlock(&gauge_series->lock);
 
         }
 
-        pthread_mutex_unlock(&gauge->lock);
+        prometheus_mutex_unlock(&gauge->lock);
     }
 
     list_foreach(metrics->histograms, histogram)
     {
-        pthread_mutex_lock(&histogram->lock);
+        prometheus_mutex_lock(&histogram->lock);
 
         bp = prometheus_metrics_emit_base(bp, end, &histogram->base);
 
         list_foreach(histogram->series, histogram_series)
         {
-            pthread_mutex_lock(&histogram_series->lock);
+            prometheus_mutex_lock(&histogram_series->lock);
 
             cumulative = 0;
 
@@ -510,11 +510,11 @@ prometheus_metrics_scrape(
 
                 if (i + 1 < histogram->count) {
                     if (histogram->type == PROMETHEUS_HISTOGRAM_EXPONENTIAL) {
-                        snprintf(bucket_threshold, sizeof(bucket_threshold), "%lu", (1UL << (i + 1)));
+                        snprintf(bucket_threshold, sizeof(bucket_threshold), "%" PRIu64, (UINT64_C(1) << (i + 1)));
                     } else if (histogram->type == PROMETHEUS_HISTOGRAM_TIME) {
                         /* Power-of-two tick boundary converted to nanoseconds. */
                         snprintf(bucket_threshold, sizeof(bucket_threshold), "%" PRIu64,
-                                 stopwatch_ticks_to_ns(&prometheus_stopwatch_ctx, 1UL << (i + 1)));
+                                 stopwatch_ticks_to_ns(&prometheus_stopwatch_ctx, UINT64_C(1) << (i + 1)));
                     } else {
                         snprintf(bucket_threshold, sizeof(bucket_threshold), "%" PRIu64, histogram->start +
                                  histogram->increment * (i + 1));
@@ -554,15 +554,15 @@ prometheus_metrics_scrape(
 
             bp = prometheus_emit(bp, end, "%" PRIu64 "\n", total);
 
-            pthread_mutex_unlock(&histogram_series->lock);
+            prometheus_mutex_unlock(&histogram_series->lock);
         }
 
         bp = prometheus_emit(bp, end, "\n");
 
-        pthread_mutex_unlock(&histogram->lock);
+        prometheus_mutex_unlock(&histogram->lock);
     }
 
-    pthread_mutex_unlock(&metrics->lock);
+    prometheus_mutex_unlock(&metrics->lock);
 
     /* A NULL bp means some emit above did not fit.  The buffer holds a
      * truncated but still NUL-terminated prefix; report the overflow so the
@@ -586,17 +586,17 @@ prometheus_metrics_create_counter(
         return NULL;
     }
 
-    pthread_mutex_lock(&metrics->lock);
+    prometheus_mutex_lock(&metrics->lock);
 
     counter = prometheus_calloc(1, sizeof(*counter));
 
     prometheus_metric_base_init(&counter->base, name, help, "counter");
 
-    pthread_mutex_init(&counter->lock, NULL);
+    prometheus_mutex_init(&counter->lock);
 
     list_append(metrics->counters, counter);
 
-    pthread_mutex_unlock(&metrics->lock);
+    prometheus_mutex_unlock(&metrics->lock);
 
     return counter;
 } /* prometheus_metrics_add_counter */
@@ -621,17 +621,17 @@ prometheus_counter_create_series(
         }
     }
 
-    pthread_mutex_lock(&counter->lock);
+    prometheus_mutex_lock(&counter->lock);
 
     series = prometheus_calloc(1, sizeof(*series));
 
     prometheus_series_base_init(&series->base, num_labels, label_names, label_values);
 
-    pthread_mutex_init(&series->lock, NULL);
+    prometheus_mutex_init(&series->lock);
 
     list_append(counter->series, series);
 
-    pthread_mutex_unlock(&counter->lock);
+    prometheus_mutex_unlock(&counter->lock);
 
     return series;
 } /* prometheus_counter_add_series */
@@ -641,13 +641,13 @@ prometheus_counter_series_create_instance(struct prometheus_counter_series *seri
 {
     struct prometheus_counter_handle *hdl;
 
-    pthread_mutex_lock(&series->lock);
+    prometheus_mutex_lock(&series->lock);
 
-    hdl = prometheus_calloc(1, sizeof(*hdl));
+    hdl = prometheus_handle_alloc(sizeof(*hdl));
 
     list_append(series->head, hdl);
 
-    pthread_mutex_unlock(&series->lock);
+    prometheus_mutex_unlock(&series->lock);
 
     return &hdl->counter;
 } /* prometheus_counter_create_instance */
@@ -665,17 +665,17 @@ prometheus_metrics_create_gauge(
         return NULL;
     }
 
-    pthread_mutex_lock(&metrics->lock);
+    prometheus_mutex_lock(&metrics->lock);
 
     gauge = prometheus_calloc(1, sizeof(*gauge));
 
     prometheus_metric_base_init(&gauge->base, name, help, "gauge");
 
-    pthread_mutex_init(&gauge->lock, NULL);
+    prometheus_mutex_init(&gauge->lock);
 
     list_append(metrics->gauges, gauge);
 
-    pthread_mutex_unlock(&metrics->lock);
+    prometheus_mutex_unlock(&metrics->lock);
 
     return gauge;
 } /* prometheus_metrics_add_gauge */
@@ -700,17 +700,17 @@ prometheus_gauge_create_series(
         }
     }
 
-    pthread_mutex_lock(&gauge->lock);
+    prometheus_mutex_lock(&gauge->lock);
 
     series = prometheus_calloc(1, sizeof(*series));
 
     prometheus_series_base_init(&series->base, num_labels, label_names, label_values);
 
-    pthread_mutex_init(&series->lock, NULL);
+    prometheus_mutex_init(&series->lock);
 
     list_append(gauge->series, series);
 
-    pthread_mutex_unlock(&gauge->lock);
+    prometheus_mutex_unlock(&gauge->lock);
 
     return series;
 } /* prometheus_gauge_add_series */
@@ -720,13 +720,13 @@ prometheus_gauge_series_create_instance(struct prometheus_gauge_series *series)
 {
     struct prometheus_gauge_handle *hdl;
 
-    pthread_mutex_lock(&series->lock);
+    prometheus_mutex_lock(&series->lock);
 
-    hdl = prometheus_calloc(1, sizeof(*hdl));
+    hdl = prometheus_handle_alloc(sizeof(*hdl));
 
     list_append(series->head, hdl);
 
-    pthread_mutex_unlock(&series->lock);
+    prometheus_mutex_unlock(&series->lock);
 
     return &hdl->gauge;
 } /* prometheus_gauge_series_create_instance */
@@ -744,7 +744,7 @@ prometheus_metrics_create_histogram_exponential(
         return NULL;
     }
 
-    pthread_mutex_lock(&metrics->lock);
+    prometheus_mutex_lock(&metrics->lock);
 
     histogram = prometheus_calloc(1, sizeof(*histogram));
 
@@ -753,18 +753,18 @@ prometheus_metrics_create_histogram_exponential(
     histogram->type  = PROMETHEUS_HISTOGRAM_EXPONENTIAL;
     histogram->count = count;
 
-    pthread_mutex_init(&histogram->lock, NULL);
+    prometheus_mutex_init(&histogram->lock);
 
     list_append(metrics->histograms, histogram);
 
-    pthread_mutex_unlock(&metrics->lock);
+    prometheus_mutex_unlock(&metrics->lock);
 
     return histogram;
 } /* prometheus_metrics_add_histogram */
 
 PUBLIC struct stopwatch_context prometheus_stopwatch_ctx;
 
-static pthread_once_t           prometheus_stopwatch_once = PTHREAD_ONCE_INIT;
+static prometheus_once          prometheus_stopwatch_once = PROMETHEUS_ONCE_INIT;
 
 static void
 prometheus_stopwatch_ctx_init(void)
@@ -785,9 +785,9 @@ prometheus_metrics_create_histogram_time(
         return NULL;
     }
 
-    pthread_once(&prometheus_stopwatch_once, prometheus_stopwatch_ctx_init);
+    prometheus_call_once(&prometheus_stopwatch_once, prometheus_stopwatch_ctx_init);
 
-    pthread_mutex_lock(&metrics->lock);
+    prometheus_mutex_lock(&metrics->lock);
 
     histogram = prometheus_calloc(1, sizeof(*histogram));
 
@@ -796,11 +796,11 @@ prometheus_metrics_create_histogram_time(
     histogram->type  = PROMETHEUS_HISTOGRAM_TIME;
     histogram->count = count;
 
-    pthread_mutex_init(&histogram->lock, NULL);
+    prometheus_mutex_init(&histogram->lock);
 
     list_append(metrics->histograms, histogram);
 
-    pthread_mutex_unlock(&metrics->lock);
+    prometheus_mutex_unlock(&metrics->lock);
 
     return histogram;
 } /* prometheus_metrics_create_histogram_time */
@@ -820,7 +820,7 @@ prometheus_metrics_create_histogram_linear(
         return NULL;
     }
 
-    pthread_mutex_lock(&metrics->lock);
+    prometheus_mutex_lock(&metrics->lock);
 
     histogram = prometheus_calloc(1, sizeof(*histogram));
 
@@ -831,11 +831,11 @@ prometheus_metrics_create_histogram_linear(
     histogram->start     = start;
     histogram->increment = increment;
 
-    pthread_mutex_init(&histogram->lock, NULL);
+    prometheus_mutex_init(&histogram->lock);
 
     list_append(metrics->histograms, histogram);
 
-    pthread_mutex_unlock(&metrics->lock);
+    prometheus_mutex_unlock(&metrics->lock);
 
     return histogram;
 } /* prometheus_metrics_add_histogram */
@@ -848,7 +848,7 @@ prometheus_histogram_create_series(
     int                          num_labels)
 {
     struct prometheus_histogram_series *series;
-    int                                 i;
+    uint64_t                            i;
 
     for (i = 0; i < num_labels; i++) {
         if (!prometheus_string_legal_name(label_names[i])) {
@@ -860,7 +860,7 @@ prometheus_histogram_create_series(
         }
     }
 
-    pthread_mutex_lock(&histogram->lock);
+    prometheus_mutex_lock(&histogram->lock);
 
     series = prometheus_calloc(1, sizeof(*series));
 
@@ -873,11 +873,11 @@ prometheus_histogram_create_series(
     series->start       = histogram->start;
     series->increment   = histogram->increment;
 
-    pthread_mutex_init(&series->lock, NULL);
+    prometheus_mutex_init(&series->lock);
 
     list_append(histogram->series, series);
 
-    pthread_mutex_unlock(&histogram->lock);
+    prometheus_mutex_unlock(&histogram->lock);
 
     return series;
 } /* prometheus_histogram_add_series */
@@ -887,9 +887,9 @@ prometheus_histogram_series_create_instance(struct prometheus_histogram_series *
 {
     struct prometheus_histogram_handle *hdl;
 
-    pthread_mutex_lock(&series->lock);
+    prometheus_mutex_lock(&series->lock);
 
-    hdl = prometheus_calloc(1, sizeof(*hdl));
+    hdl = prometheus_handle_alloc(sizeof(*hdl));
 
     hdl->histogram.buckets     = prometheus_calloc(series->num_buckets, sizeof(uint64_t));
     hdl->histogram.type        = series->type;
@@ -899,7 +899,7 @@ prometheus_histogram_series_create_instance(struct prometheus_histogram_series *
 
     list_append(series->head, hdl);
 
-    pthread_mutex_unlock(&series->lock);
+    prometheus_mutex_unlock(&series->lock);
 
     return &hdl->histogram;
 } /* prometheus_histogram_series_create_instance */
@@ -913,14 +913,14 @@ prometheus_counter_series_destroy_instance(
 
     hdl = container_of(instance, struct prometheus_counter_handle, counter);
 
-    pthread_mutex_lock(&series->lock);
+    prometheus_mutex_lock(&series->lock);
 
     series->saved += hdl->counter.value;
     list_delete(series->head, hdl);
 
-    pthread_mutex_unlock(&series->lock);
+    prometheus_mutex_unlock(&series->lock);
 
-    free(hdl);
+    prometheus_handle_free(hdl);
 } /* prometheus_counter_series_destroy_instance */
 
 PUBLIC void
@@ -928,15 +928,15 @@ prometheus_counter_destroy_series(
     struct prometheus_counter        *counter,
     struct prometheus_counter_series *series)
 {
-    pthread_mutex_lock(&counter->lock);
+    prometheus_mutex_lock(&counter->lock);
     list_delete(counter->series, series);
-    pthread_mutex_unlock(&counter->lock);
+    prometheus_mutex_unlock(&counter->lock);
 
     while (series->head) {
         prometheus_counter_series_destroy_instance(series, &series->head->counter);
     }
 
-    pthread_mutex_destroy(&series->lock);
+    prometheus_mutex_destroy(&series->lock);
 
     prometheus_series_base_destroy(&series->base);
 
@@ -950,15 +950,15 @@ prometheus_counter_destroy(
     struct prometheus_metrics *metrics,
     struct prometheus_counter *counter)
 {
-    pthread_mutex_lock(&metrics->lock);
+    prometheus_mutex_lock(&metrics->lock);
     list_delete(metrics->counters, counter);
-    pthread_mutex_unlock(&metrics->lock);
+    prometheus_mutex_unlock(&metrics->lock);
 
     while (counter->series) {
         prometheus_counter_destroy_series(counter, counter->series);
     }
 
-    pthread_mutex_destroy(&counter->lock);
+    prometheus_mutex_destroy(&counter->lock);
 
     prometheus_metric_base_destroy(&counter->base);
 
@@ -975,14 +975,14 @@ prometheus_gauge_series_destroy_instance(
 
     hdl = container_of(instance, struct prometheus_gauge_handle, gauge);
 
-    pthread_mutex_lock(&series->lock);
+    prometheus_mutex_lock(&series->lock);
 
     series->saved += hdl->gauge.value;
     list_delete(series->head, hdl);
 
-    pthread_mutex_unlock(&series->lock);
+    prometheus_mutex_unlock(&series->lock);
 
-    free(hdl);
+    prometheus_handle_free(hdl);
 } /* prometheus_gauge_series_destroy_instance */
 
 PUBLIC void
@@ -990,15 +990,15 @@ prometheus_gauge_destroy_series(
     struct prometheus_gauge        *gauge,
     struct prometheus_gauge_series *series)
 {
-    pthread_mutex_lock(&gauge->lock);
+    prometheus_mutex_lock(&gauge->lock);
     list_delete(gauge->series, series);
-    pthread_mutex_unlock(&gauge->lock);
+    prometheus_mutex_unlock(&gauge->lock);
 
     while (series->head) {
         prometheus_gauge_series_destroy_instance(series, &series->head->gauge);
     }
 
-    pthread_mutex_destroy(&series->lock);
+    prometheus_mutex_destroy(&series->lock);
 
     prometheus_series_base_destroy(&series->base);
 
@@ -1010,15 +1010,15 @@ prometheus_gauge_destroy(
     struct prometheus_metrics *metrics,
     struct prometheus_gauge   *gauge)
 {
-    pthread_mutex_lock(&metrics->lock);
+    prometheus_mutex_lock(&metrics->lock);
     list_delete(metrics->gauges, gauge);
-    pthread_mutex_unlock(&metrics->lock);
+    prometheus_mutex_unlock(&metrics->lock);
 
     while (gauge->series) {
         prometheus_gauge_destroy_series(gauge, gauge->series);
     }
 
-    pthread_mutex_destroy(&gauge->lock);
+    prometheus_mutex_destroy(&gauge->lock);
 
     prometheus_metric_base_destroy(&gauge->base);
 
@@ -1032,11 +1032,11 @@ prometheus_histogram_series_destroy_instance(
     struct prometheus_histogram_instance *instance)
 {
     struct prometheus_histogram_handle *hdl;
-    int                                 i;
+    uint64_t                            i;
 
     hdl = container_of(instance, struct prometheus_histogram_handle, histogram);
 
-    pthread_mutex_lock(&series->lock);
+    prometheus_mutex_lock(&series->lock);
 
     for (i = 0; i < series->num_buckets; i++) {
         series->saved[i] += instance->buckets[i];
@@ -1047,10 +1047,10 @@ prometheus_histogram_series_destroy_instance(
 
     list_delete(series->head, hdl);
 
-    pthread_mutex_unlock(&series->lock);
+    prometheus_mutex_unlock(&series->lock);
 
     free(hdl->histogram.buckets);
-    free(hdl);
+    prometheus_handle_free(hdl);
 } /* prometheus_histogram_series_destroy_instance */
 
 PUBLIC void
@@ -1058,15 +1058,15 @@ prometheus_histogram_destroy_series(
     struct prometheus_histogram        *histogram,
     struct prometheus_histogram_series *series)
 {
-    pthread_mutex_lock(&histogram->lock);
+    prometheus_mutex_lock(&histogram->lock);
     list_delete(histogram->series, series);
-    pthread_mutex_unlock(&histogram->lock);
+    prometheus_mutex_unlock(&histogram->lock);
 
     while (series->head) {
         prometheus_histogram_series_destroy_instance(series, &series->head->histogram);
     }
 
-    pthread_mutex_destroy(&series->lock);
+    prometheus_mutex_destroy(&series->lock);
 
     prometheus_series_base_destroy(&series->base);
 
@@ -1081,15 +1081,15 @@ prometheus_histogram_destroy(
     struct prometheus_histogram *histogram)
 {
 
-    pthread_mutex_lock(&metrics->lock);
+    prometheus_mutex_lock(&metrics->lock);
     list_delete(metrics->histograms, histogram);
-    pthread_mutex_unlock(&metrics->lock);
+    prometheus_mutex_unlock(&metrics->lock);
 
     while (histogram->series) {
         prometheus_histogram_destroy_series(histogram, histogram->series);
     }
 
-    pthread_mutex_destroy(&histogram->lock);
+    prometheus_mutex_destroy(&histogram->lock);
 
     prometheus_metric_base_destroy(&histogram->base);
 
@@ -1118,7 +1118,7 @@ prometheus_metrics_destroy(struct prometheus_metrics *metrics)
         free(metrics->label_values[i]);
     }
 
-    pthread_mutex_destroy(&metrics->lock);
+    prometheus_mutex_destroy(&metrics->lock);
 
     free(metrics->label_names);
     free(metrics->label_values);

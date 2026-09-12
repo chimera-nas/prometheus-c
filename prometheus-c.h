@@ -6,6 +6,31 @@
 
 #include <stdint.h>
 #include "stopwatch.h"
+#ifdef _WIN32
+#include <intrin.h>
+#ifdef PROMETHEUS_BUILD
+#define PROMETHEUS_API __declspec(dllexport)
+#else // ifdef PROMETHEUS_BUILD
+#define PROMETHEUS_API __declspec(dllimport)
+#endif // ifdef PROMETHEUS_BUILD
+#else // ifdef _WIN32
+#define PROMETHEUS_API __attribute__((visibility("default")))
+#endif // ifdef _WIN32
+
+static inline uint64_t
+prometheus_log2(uint64_t value)
+{
+    if (!value) {
+        return 0;
+    }
+#ifdef _WIN32
+    unsigned long index;
+    _BitScanReverse64(&index, value);
+    return index;
+#else // ifdef _WIN32
+    return (uint64_t) (63 - __builtin_clzll(value));
+#endif // ifdef _WIN32
+} // prometheus_log2
 
 struct prometheus_metrics;
 
@@ -48,43 +73,43 @@ struct prometheus_histogram_instance {
     enum prometheus_histogram_type type;
 };
 
-struct prometheus_metrics * prometheus_metrics_create(
+PROMETHEUS_API struct prometheus_metrics * prometheus_metrics_create(
     char **label_names,
     char **label_values,
     int    label_count);
 
-void prometheus_metrics_destroy(
+PROMETHEUS_API void prometheus_metrics_destroy(
     struct prometheus_metrics *metrics);
 
-int prometheus_metrics_scrape(
+PROMETHEUS_API int prometheus_metrics_scrape(
     struct prometheus_metrics *metrics,
     char                      *buffer,
     int                        buffer_size);
 
 
-struct prometheus_counter * prometheus_metrics_create_counter(
+PROMETHEUS_API struct prometheus_counter * prometheus_metrics_create_counter(
     struct prometheus_metrics *metrics,
     const char                *name,
     const char                *help);
 
-void prometheus_counter_destroy(
+PROMETHEUS_API void prometheus_counter_destroy(
     struct prometheus_metrics *metrics,
     struct prometheus_counter *counter);
 
-struct prometheus_counter_series * prometheus_counter_create_series(
+PROMETHEUS_API struct prometheus_counter_series * prometheus_counter_create_series(
     struct prometheus_counter *counter,
     const char               **label_names,
     const char               **label_values,
     int                        num_labels);
 
-void prometheus_counter_destroy_series(
+PROMETHEUS_API void prometheus_counter_destroy_series(
     struct prometheus_counter        *counter,
     struct prometheus_counter_series *series);
 
-struct prometheus_counter_instance * prometheus_counter_series_create_instance(
+PROMETHEUS_API struct prometheus_counter_instance * prometheus_counter_series_create_instance(
     struct prometheus_counter_series *series);
 
-void prometheus_counter_series_destroy_instance(
+PROMETHEUS_API void prometheus_counter_series_destroy_instance(
     struct prometheus_counter_series   *series,
     struct prometheus_counter_instance *instance);
 
@@ -102,31 +127,31 @@ prometheus_counter_add(
     instance->value += value;
 } /* prometheus_counter_instance_add */
 
-struct prometheus_gauge * prometheus_metrics_create_gauge(
+PROMETHEUS_API struct prometheus_gauge * prometheus_metrics_create_gauge(
     struct prometheus_metrics *metrics,
     const char                *name,
     const char                *help);
 
-void
+PROMETHEUS_API void
 prometheus_gauge_destroy(
     struct prometheus_metrics *metrics,
     struct prometheus_gauge   *gauge);
 
-struct prometheus_gauge_series * prometheus_gauge_create_series(
+PROMETHEUS_API struct prometheus_gauge_series * prometheus_gauge_create_series(
     struct prometheus_gauge *gauge,
     const char             **label_names,
     const char             **label_values,
     int                      num_labels);
 
-void
+PROMETHEUS_API void
 prometheus_gauge_destroy_series(
     struct prometheus_gauge        *gauge,
     struct prometheus_gauge_series *series);
 
-struct prometheus_gauge_instance * prometheus_gauge_series_create_instance(
+PROMETHEUS_API struct prometheus_gauge_instance * prometheus_gauge_series_create_instance(
     struct prometheus_gauge_series *series);
 
-void prometheus_gauge_series_destroy_instance(
+PROMETHEUS_API void prometheus_gauge_series_destroy_instance(
     struct prometheus_gauge_series   *series,
     struct prometheus_gauge_instance *instance);
 
@@ -147,13 +172,13 @@ prometheus_gauge_add(
 } /* prometheus_gauge_instance_add */
 
 
-struct prometheus_histogram * prometheus_metrics_create_histogram_exponential(
+PROMETHEUS_API struct prometheus_histogram * prometheus_metrics_create_histogram_exponential(
     struct prometheus_metrics *metrics,
     const char                *name,
     const char                *help,
     uint64_t                   count);
 
-struct prometheus_histogram * prometheus_metrics_create_histogram_linear(
+PROMETHEUS_API struct prometheus_histogram * prometheus_metrics_create_histogram_linear(
     struct prometheus_metrics *metrics,
     const char                *name,
     const char                *help,
@@ -169,32 +194,32 @@ struct prometheus_histogram * prometheus_metrics_create_histogram_linear(
  *
  * The first call initializes a process-wide stopwatch context.
  */
-struct prometheus_histogram * prometheus_metrics_create_histogram_time(
+PROMETHEUS_API struct prometheus_histogram * prometheus_metrics_create_histogram_time(
     struct prometheus_metrics *metrics,
     const char                *name,
     const char                *help,
     uint64_t                   count);
 
-void prometheus_histogram_destroy(
+PROMETHEUS_API void prometheus_histogram_destroy(
     struct prometheus_metrics   *metrics,
     struct prometheus_histogram *histogram);
 
 
-struct prometheus_histogram_series * prometheus_histogram_create_series(
+PROMETHEUS_API struct prometheus_histogram_series * prometheus_histogram_create_series(
     struct prometheus_histogram *base,
     const char                 **label_names,
     const char                 **label_values,
     int                          num_labels);
 
-void prometheus_histogram_destroy_series(
+PROMETHEUS_API void prometheus_histogram_destroy_series(
     struct prometheus_histogram        *histogram,
     struct prometheus_histogram_series *series);
 
 
-struct prometheus_histogram_instance * prometheus_histogram_series_create_instance(
+PROMETHEUS_API struct prometheus_histogram_instance * prometheus_histogram_series_create_instance(
     struct prometheus_histogram_series *series);
 
-void prometheus_histogram_series_destroy_instance(
+PROMETHEUS_API void prometheus_histogram_series_destroy_instance(
     struct prometheus_histogram_series   *series,
     struct prometheus_histogram_instance *instance);
 
@@ -206,7 +231,7 @@ prometheus_histogram_sample(
     uint64_t i;
 
     if (instance->type == PROMETHEUS_HISTOGRAM_EXPONENTIAL) {
-        i = 63 - __builtin_clzll(value);
+        i = prometheus_log2((uint64_t) value);
     } else {
         i = (value - instance->start) / instance->increment;
     }
@@ -243,7 +268,7 @@ struct prometheus_stopwatch {
  * prometheus_metrics_create_histogram_time(); read-only thereafter, so the
  * start/sample hot path takes no locks.
  */
-extern struct stopwatch_context prometheus_stopwatch_ctx;
+extern PROMETHEUS_API struct stopwatch_context prometheus_stopwatch_ctx;
 
 static inline void
 prometheus_stopwatch_start(struct prometheus_stopwatch *sw)
@@ -270,7 +295,7 @@ prometheus_time_histogram_sample(
     /* Same power-of-two bucketing as EXPONENTIAL, but on raw ticks.
      * __builtin_clzll(0) is undefined, so a zero-tick delta maps to bucket 0.
      */
-    uint64_t i = ticks ? (uint64_t) (63 - __builtin_clzll(ticks)) : 0;
+    uint64_t i = prometheus_log2(ticks);
 
     if (i >= instance->num_buckets) {
         i = instance->num_buckets - 1;
