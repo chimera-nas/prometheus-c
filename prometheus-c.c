@@ -435,7 +435,7 @@ prometheus_metrics_scrape(
 
             list_foreach(counter_series->head, counter_hdl)
             {
-                value += counter_hdl->counter.value;
+                value += atomic_load_explicit(&counter_hdl->counter.value, memory_order_relaxed);
 
             }
 
@@ -466,7 +466,7 @@ prometheus_metrics_scrape(
 
             list_foreach(gauge_series->head, gauge_hdl)
             {
-                value += gauge_hdl->gauge.value;
+                value += atomic_load_explicit(&gauge_hdl->gauge.value, memory_order_relaxed);
             }
 
             bp = prometheus_metrics_emit_series_base(bp, end, metrics, "",
@@ -499,7 +499,8 @@ prometheus_metrics_scrape(
 
                 list_foreach(histogram_series->head, histogram_hdl)
                 {
-                    histogram_series->buckets[i] += histogram_hdl->histogram.buckets[i];
+                    histogram_series->buckets[i] += atomic_load_explicit(&histogram_hdl->histogram.buckets[i],
+                                                                         memory_order_relaxed);
                 }
 
                 /* Prometheus bucket counts are cumulative (le = "less than or
@@ -535,8 +536,8 @@ prometheus_metrics_scrape(
 
             list_foreach(histogram_series->head, histogram_hdl)
             {
-                sum   += histogram_hdl->histogram.sum;
-                total += histogram_hdl->histogram.count;
+                sum   += atomic_load_explicit(&histogram_hdl->histogram.sum, memory_order_relaxed);
+                total += atomic_load_explicit(&histogram_hdl->histogram.count, memory_order_relaxed);
             }
 
             bp = prometheus_metrics_emit_series_base(bp, end, metrics, "_sum",
@@ -644,6 +645,7 @@ prometheus_counter_series_create_instance(struct prometheus_counter_series *seri
     prometheus_mutex_lock(&series->lock);
 
     hdl = prometheus_handle_alloc(sizeof(*hdl));
+    atomic_init(&hdl->counter.value, 0);
 
     list_append(series->head, hdl);
 
@@ -723,6 +725,7 @@ prometheus_gauge_series_create_instance(struct prometheus_gauge_series *series)
     prometheus_mutex_lock(&series->lock);
 
     hdl = prometheus_handle_alloc(sizeof(*hdl));
+    atomic_init(&hdl->gauge.value, 0);
 
     list_append(series->head, hdl);
 
@@ -891,7 +894,12 @@ prometheus_histogram_series_create_instance(struct prometheus_histogram_series *
 
     hdl = prometheus_handle_alloc(sizeof(*hdl));
 
-    hdl->histogram.buckets     = prometheus_calloc(series->num_buckets, sizeof(uint64_t));
+    hdl->histogram.buckets = prometheus_calloc(series->num_buckets, sizeof(*hdl->histogram.buckets));
+    atomic_init(&hdl->histogram.sum, 0);
+    atomic_init(&hdl->histogram.count, 0);
+    for (uint64_t i = 0; i < series->num_buckets; i++) {
+        atomic_init(&hdl->histogram.buckets[i], 0);
+    }
     hdl->histogram.type        = series->type;
     hdl->histogram.num_buckets = series->num_buckets;
     hdl->histogram.start       = series->start;
@@ -915,7 +923,7 @@ prometheus_counter_series_destroy_instance(
 
     prometheus_mutex_lock(&series->lock);
 
-    series->saved += hdl->counter.value;
+    series->saved += atomic_load_explicit(&hdl->counter.value, memory_order_relaxed);
     list_delete(series->head, hdl);
 
     prometheus_mutex_unlock(&series->lock);
@@ -977,7 +985,7 @@ prometheus_gauge_series_destroy_instance(
 
     prometheus_mutex_lock(&series->lock);
 
-    series->saved += hdl->gauge.value;
+    series->saved += atomic_load_explicit(&hdl->gauge.value, memory_order_relaxed);
     list_delete(series->head, hdl);
 
     prometheus_mutex_unlock(&series->lock);
@@ -1039,11 +1047,11 @@ prometheus_histogram_series_destroy_instance(
     prometheus_mutex_lock(&series->lock);
 
     for (i = 0; i < series->num_buckets; i++) {
-        series->saved[i] += instance->buckets[i];
+        series->saved[i] += atomic_load_explicit(&instance->buckets[i], memory_order_relaxed);
     }
 
-    series->saved_sum   += instance->sum;
-    series->saved_count += instance->count;
+    series->saved_sum   += atomic_load_explicit(&instance->sum, memory_order_relaxed);
+    series->saved_count += atomic_load_explicit(&instance->count, memory_order_relaxed);
 
     list_delete(series->head, hdl);
 

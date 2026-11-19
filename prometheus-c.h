@@ -5,6 +5,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdatomic.h>
 #include "stopwatch.h"
 #ifdef _WIN32
 #include <intrin.h>
@@ -38,14 +39,14 @@ struct prometheus_counter;
 struct prometheus_counter_series;
 
 struct prometheus_counter_instance {
-    uint64_t value;
+    _Atomic uint64_t value;
 };
 
 struct prometheus_gauge;
 struct prometheus_gauge_series;
 
 struct prometheus_gauge_instance {
-    int64_t value;
+    _Atomic int64_t value;
 };
 
 struct prometheus_histogram;
@@ -64,12 +65,12 @@ enum prometheus_histogram_type {
 };
 
 struct prometheus_histogram_instance {
-    uint64_t  sum;
-    uint64_t  count;
-    uint64_t  start;
-    uint64_t  increment;
-    uint64_t  num_buckets;
-    uint64_t *buckets;
+    _Atomic uint64_t  sum;
+    _Atomic uint64_t  count;
+    uint64_t          start;
+    uint64_t          increment;
+    uint64_t          num_buckets;
+    _Atomic uint64_t *buckets;
     enum prometheus_histogram_type type;
 };
 
@@ -116,7 +117,9 @@ PROMETHEUS_API void prometheus_counter_series_destroy_instance(
 static inline void
 prometheus_counter_increment(struct prometheus_counter_instance *instance)
 {
-    instance->value++;
+    uint64_t old = atomic_load_explicit(&instance->value, memory_order_relaxed);
+
+    atomic_store_explicit(&instance->value, old + 1, memory_order_relaxed);
 } /* prometheus_counter_instance_increment */
 
 static inline void
@@ -124,7 +127,9 @@ prometheus_counter_add(
     struct prometheus_counter_instance *instance,
     uint64_t                            value)
 {
-    instance->value += value;
+    uint64_t old = atomic_load_explicit(&instance->value, memory_order_relaxed);
+
+    atomic_store_explicit(&instance->value, old + value, memory_order_relaxed);
 } /* prometheus_counter_instance_add */
 
 PROMETHEUS_API struct prometheus_gauge * prometheus_metrics_create_gauge(
@@ -160,7 +165,7 @@ prometheus_gauge_set(
     struct prometheus_gauge_instance *instance,
     int64_t                           value)
 {
-    instance->value = value;
+    atomic_store_explicit(&instance->value, value, memory_order_relaxed);
 } /* prometheus_gauge_instance_set */
 
 static inline void
@@ -168,7 +173,9 @@ prometheus_gauge_add(
     struct prometheus_gauge_instance *instance,
     int64_t                           value)
 {
-    instance->value += value;
+    int64_t old = atomic_load_explicit(&instance->value, memory_order_relaxed);
+
+    atomic_store_explicit(&instance->value, old + value, memory_order_relaxed);
 } /* prometheus_gauge_instance_add */
 
 
@@ -240,10 +247,12 @@ prometheus_histogram_sample(
         i = instance->num_buckets - 1;
     }
 
-    instance->buckets[i]++;
-
-    instance->sum += value;
-    instance->count++;
+    uint64_t bucket = atomic_load_explicit(&instance->buckets[i], memory_order_relaxed);
+    atomic_store_explicit(&instance->buckets[i], bucket + 1, memory_order_relaxed);
+    uint64_t sum = atomic_load_explicit(&instance->sum, memory_order_relaxed);
+    atomic_store_explicit(&instance->sum, sum + (uint64_t) value, memory_order_relaxed);
+    uint64_t count = atomic_load_explicit(&instance->count, memory_order_relaxed);
+    atomic_store_explicit(&instance->count, count + 1, memory_order_relaxed);
 } /* prometheus_histogram_instance_sample */
 
 /*
@@ -301,8 +310,11 @@ prometheus_time_histogram_sample(
         i = instance->num_buckets - 1;
     }
 
-    instance->buckets[i]++;
-    instance->sum += ticks;
-    instance->count++;
+    uint64_t bucket = atomic_load_explicit(&instance->buckets[i], memory_order_relaxed);
+    atomic_store_explicit(&instance->buckets[i], bucket + 1, memory_order_relaxed);
+    uint64_t sum = atomic_load_explicit(&instance->sum, memory_order_relaxed);
+    atomic_store_explicit(&instance->sum, sum + ticks, memory_order_relaxed);
+    uint64_t count = atomic_load_explicit(&instance->count, memory_order_relaxed);
+    atomic_store_explicit(&instance->count, count + 1, memory_order_relaxed);
 } /* prometheus_time_histogram_sample */
 

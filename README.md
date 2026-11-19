@@ -49,10 +49,22 @@ All the functions related to creating and destroying metrics, metric series, and
 
 The metrics scraping API is thread safe.
 
-The metric instance handles themselves are not thread safe.   That is to say, if two threads increment a counter handle at
-the same time, the resulting counter value might increment by only one.   This will not cause a crash or anything but it
-may result in counters that are not completely accurate.  If this matters to you, either use instance handles in a thread
-safe way in your application as described above or protect them yourselves with a lock.
+Counter, gauge, and histogram instance values are C11 atomic fields.  This
+changes the public instance struct types and may change their ABI; consumers
+that use these structs should rebuild against this header.  No new metric
+functions are added.
+Use the helper functions below to update instances; code that accesses the
+fields directly must use C11 atomic operations.
+
+Atomic fields allow a scrape to read an instance while it is being sampled,
+without blocking the sampling path.  They do not make an instance safe for
+concurrent writers: the add and sample helpers use relaxed load/store pairs,
+not atomic read-modify-write operations.  If two threads update the same
+instance at once, updates can be lost.  Give each writer its own instance or
+serialize access with an application-provided lock, as described above.
+
+A scrape concurrent with sampling is not a transaction across all fields.  A
+histogram's buckets, sum, and count can reflect slightly different instants.
 
 ### Global Metrics State
 
